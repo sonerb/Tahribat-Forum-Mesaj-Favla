@@ -1,11 +1,15 @@
 // ==UserScript==
-// @name         Post Favla
-// @namespace    http://tampermonkey.net/
+// @name         Tahribat Forum Mesaj Favla
+// @namespace    http://www.tahribat.com/
 // @version      0.1
-// @description  try to take over the world!
-// @author       You
+// @description  Forumda beğendiğiniz mesajları favlayarak daha sonra profilinizde buna erişebilirsiniz.
+// @author       pSkpt
 // @match        https://*.tahribat.com/*
 // @grant        none
+// @updateURL    https://github.com/sonerb/Tahribat-Forum-Mesaj-Favla/raw/master/tahribat_forum_message_fav.user.js
+// @downloadURL  https://github.com/sonerb/Tahribat-Forum-Mesaj-Favla/raw/master/tahribat_forum_message_fav.user.js
+// @supportURL   https://www.tahribat.com/Forum?ref=39260
+// @icon         https://www.tahribat.com/favicon.ico
 // ==/UserScript==
 
 (function () {
