@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Tahribat Forum Mesaj Favla
 // @namespace    http://www.tahribat.com/
-// @version      0.2
+// @version      0.3
 // @description  Forumda beğendiğiniz mesajları favlayarak daha sonra profilinizde buna erişebilirsiniz.
 // @author       pSkpt
 // @match        https://*.tahribat.com/*
@@ -10,6 +10,8 @@
 // @downloadURL  https://github.com/sonerb/Tahribat-Forum-Mesaj-Favla/raw/master/tahribat_forum_message_fav.user.js
 // @supportURL   https://www.tahribat.com/Members/pSkpt?ref=39260
 // @icon         https://www.tahribat.com/favicon.ico
+// @require      https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/aes.js
+
 // ==/UserScript==
 
 (function () {
@@ -17,8 +19,135 @@
     var webdb = {};
     webdb.db = null;
 
+    function formatDate(d) {
+        var day = d.getDate() < 10 ? "0" + d.getDate() : d.getDate();
+        var month = d.getMonth() < 10 ? "0" + d.getMonth() : d.getMonth();
+        var hour = d.getHours() < 10 ? "0" + d.getHours() : d.getHours();
+        var minute =
+            d.getMinutes() < 10 ? "0" + d.getMinutes() : d.getMinutes();
+
+        return (
+            day + "/" + month + "/" + d.getFullYear() + " " + hour + ":" + minute
+        );
+    }
+
+    let code = (function () {
+        return {
+            encryptMessage: function (messageToencrypt = "", secretkey = "") {
+                var encryptedMessage = CryptoJS.AES.encrypt(
+                    messageToencrypt,
+                    secretkey
+                );
+                return encryptedMessage.toString();
+            },
+            decryptMessage: function (encryptedMessage = "", secretkey = "") {
+                try{
+                    var decryptedBytes = CryptoJS.AES.decrypt(encryptedMessage, secretkey);
+                    var decryptedMessage = decryptedBytes.toString(CryptoJS.enc.Utf8);
+                }
+                catch(error)
+                {
+                    return false;
+                }
+
+                return decryptedMessage;
+            },
+        };
+    })();
+
+    String.prototype.hexEncode = function(){
+        var hex, i;
+
+        var result = "";
+        for (i=0; i<this.length; i++) {
+            hex = this.charCodeAt(i).toString(16);
+            result += ("000"+hex).slice(-4);
+        }
+
+        return result
+    }
+
+    String.prototype.hexDecode = function(){
+        var j;
+        var hexes = this.match(/.{1,4}/g) || [];
+        var back = "";
+        for(j = 0; j<hexes.length; j++) {
+            back += String.fromCharCode(parseInt(hexes[j], 16));
+        }
+
+        return back;
+    }
+
+    function delete_share() {
+        return new Promise(function (resolve, reject) {
+            document.querySelectorAll("table.footable-loaded:nth-of-type(2) a:not([class])").forEach(function (el, idx) {
+                if (el.textContent == "Fav Backup") {
+                    var mpsid = el.parentElement.parentElement.querySelector("td:nth-of-type(3) > a").dataset.mpsid;
+                    var headers = [
+                        {
+                            token: window.notifyToken,
+                        },
+                    ];
+                    http_get("https://www.tahribat.com/api/Core/RemoveProfileShare?MemberProfileShareId=" + mpsid, headers)
+                        .then(function (data) {
+                        resolve(true);
+                    })
+                        .catch(function (err) {
+                        reject(err);
+                    });
+                }
+            });
+            resolve(true);
+        });
+    }
+
+
+    function http_get(url, headers=null) {
+        var xhr = new XMLHttpRequest();
+
+        return new Promise(function(resolve, reject) {
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState == 4) {
+                    if (xhr.status >= 300) {
+                        reject("Error, status code = " + xhr.status)
+                    } else {
+                        resolve(xhr.responseText);
+                    }
+                }
+            }
+            xhr.open('GET', url, true)
+
+            if (headers != null){
+                headers.forEach(function (el, idx){
+                    xhr.setRequestHeader(Object.keys(el), el[Object.keys(el)]);
+                });
+            }
+
+            xhr.send();
+        });
+    }
+
+    function http_post(url, data)
+    {
+        var xhr = new XMLHttpRequest();
+
+        return new Promise(function(resolve, reject) {
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState == 4) {
+                    if (xhr.status >= 300) {
+                        reject("Error, status code = " + xhr.status)
+                    } else {
+                        resolve(xhr.responseText);
+                    }
+                }
+            }
+            xhr.open('POST', url, true);
+            xhr.send(data);
+        });
+    }
+
     webdb.open = function () {
-        var dbSize = 2 * 1024 * 1024; // 5MB
+        var dbSize = 2 * 1024 * 1024; // 2MB
         webdb.db = openDatabase("db_post_fava", "1.0", "Favlanmis Postlar", dbSize);
     };
 
@@ -61,7 +190,6 @@
     };
 
     webdb.getPageFav = function (url_id, page, renderFunc) {
-
         var db = webdb.db;
         db.transaction(function (tx) {
             tx.executeSql(
@@ -74,7 +202,6 @@
     };
 
     webdb.deleteFav = function (msg_id) {
-
         var db = webdb.db;
         db.transaction(function (tx) {
             tx.executeSql(
@@ -87,7 +214,6 @@
     };
 
     webdb.getFullFav = function (renderFunc) {
-
         var db = webdb.db;
         db.transaction(function (tx) {
             tx.executeSql(
@@ -106,6 +232,116 @@
     webdb.onSuccess = function (tx, r) {
         // re-render the data.
     };
+
+    webdb.backUpProgress = function (transaction, results) {
+        var password = window.prompt("Enter Password (don't forget!):");
+        if (password == null || password == "") return;
+        if (password.length < 5)
+        {
+            alert('Password must be more than 5 characters!');
+            return;
+        }
+        var _exportSql = "CREATE TABLE IF NOT EXISTS favlar (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, topic_title TEXT NOT NULL, username NOT NULL, msg_id INTEGER NOT NULL, url TEXT NOT NULL, url_id INTEGER NOT NULL, page INTEGER NOT NULL, added_on DATETIME);";
+        if (results.rows) {
+            for (var i = 0; i < results.rows.length; i++) {
+                var row = results.rows.item(i);
+                var _fields = [];
+                var _values = [];
+                for (var col in row) {
+                    if (col == "id") continue;
+                    _fields.push(col);
+                    _values.push('"' + row[col] + '"');
+                }
+                _exportSql +=";\nINSERT INTO favlar(" +_fields.join(",") +") VALUES (" +_values.join(",") +")";
+
+            }
+
+            var b64encoded = btoa(unescape(encodeURIComponent(_exportSql)))
+            var encrypted = code.encryptMessage(b64encoded, password).hexEncode();
+
+            var parser = new DOMParser();
+            var resp;
+            var pm_id = 0;
+            var username = document.querySelector("#topusermenu").textContent.trim();
+
+            http_get('https://www.tahribat.com/Pm?to='+username).then(function(data){
+                resp = parser.parseFromString(data, "text/html");
+                var token = resp.getElementsByName('__RequestVerificationToken')[0].value;
+
+                var formData = new FormData();
+                formData.append("__RequestVerificationToken", token);
+                formData.append("Username", username);
+                formData.append("subject", "Favori Backup (" + formatDate(new Date()) + ")");
+                formData.append("message", encrypted);
+                formData.append("cmd", "NewPm");
+
+                return http_post("https://www.tahribat.com/PM?to="+username, formData);
+            }).then(function(data){
+                return http_get("https://www.tahribat.com/PM?action=Inbox");
+            }).then(function(data){
+                resp = parser.parseFromString(data, "text/html");
+                var msgs = resp.querySelectorAll("table#InboxTable tr");
+                for (var i = 1; i < msgs.length; i++)
+                {
+                    var msg = msgs[i];
+                    var link = msg.querySelector("td > a");
+                    if (link.textContent.trim().substr(0, 13) == "Favori Backup")
+                    {
+                        pm_id = link.href.split("=")[1].trim();
+                        break;
+                    }
+                }
+                return http_get("https://www.tahribat.com/Pm?pmid=" + pm_id);
+            }).then(function(data){
+                return delete_share();
+            }).then(function(data){
+                var pm_id_enc = code.encryptMessage(pm_id, password);
+
+                var formData = new FormData();
+                formData.append("__RequestVerificationToken", document.querySelector("input[name=__RequestVerificationToken]").value);
+                formData.append("action", "profileshare");
+                formData.append("pstitle", "Fav Backup");
+                formData.append("psurl", document.location);
+                formData.append("pstxt", pm_id_enc);
+                formData.append("Paylaş", "Paylaş");
+
+                return http_post(document.location, formData);
+            }).then(function(data){
+                document.location.reload();
+            }).catch(function(err){
+                console.log(err);
+            });
+        }
+    }
+
+    webdb.backUp = function () {
+        var db = webdb.db;
+        db.transaction(function (tx) {
+            tx.executeSql("SELECT * FROM favlar", [], webdb.backUpProgress, webdb.onError);
+        });
+    };
+
+    webdb.resetTable = function (){
+        var sql = "CREATE TABLE IF NOT EXISTS favlar (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, topic_title TEXT NOT NULL, username NOT NULL, msg_id INTEGER NOT NULL, url TEXT NOT NULL, url_id INTEGER NOT NULL, page INTEGER NOT NULL, added_on DATETIME);";
+        var db = webdb.db;
+        db.transaction(function (tx) {
+            tx.executeSql("DROP TABLE favlar", [], webdb.onSuccess, webdb.onError);
+            tx.executeSql(sql, [], webdb.onSuccess, webdb.onError);
+        });
+    }
+
+    webdb.import = function(sql_cmds)
+    {
+        var db = webdb.db;
+        db.transaction(function (tx) {
+            tx.executeSql("DROP TABLE favlar", [], webdb.onSuccess, webdb.onError);
+
+            sql_cmds.forEach(function(cmd, idx){
+                tx.executeSql(cmd, [], webdb.onSuccess, webdb.onError);
+            });
+
+        });
+    }
 
     if (document.location.pathname.indexOf("/forum/") > -1) {
         var url_bol = document.location.pathname.split("/");
@@ -140,11 +376,10 @@
                     item.querySelector("div.posthead > a").id.substring(3)
                 );
 
-                if (msg_id == url_hash)
-                {
-                    item.style = "box-shadow: 0px 0px 15px 3px rgb(253, 253, 0);"
+                if (msg_id == url_hash) {
+                    item.style = "box-shadow: 0px 0px 15px 3px rgb(253, 253, 0);";
                     item.scrollIntoView(true);
-                    window.scrollTo(window.scrollX, window.scrollY-20);
+                    window.scrollTo(window.scrollX, window.scrollY - 20);
                 }
 
                 var username = item.querySelector("div.postMain > div.postPanel > a")
@@ -203,8 +438,7 @@
             function full_fav(tx, data) {
                 var styleSheet = document.createElement("style");
                 styleSheet.type = "text/css";
-                styleSheet.innerText =
-                    ".tableBodyScroll tbody {display: block; max-height: 300px; overflow-y: scroll;} .tableBodyScroll thead, .tableBodyScroll tbody tr { display: table; width: 100%; table-layout: fixed;}";
+                styleSheet.innerText = ".tableBodyScroll tbody {display: block; max-height: 300px; overflow-y: scroll;} .tableBodyScroll thead, .tableBodyScroll tbody tr { display: table; width: 100%; table-layout: fixed;}";
                 document.head.appendChild(styleSheet);
 
                 var myTable = document.querySelector("table.forumwindow");
@@ -212,7 +446,27 @@
                 myClone.className = "";
                 myClone.classList.add("tableBodyScroll");
                 myClone.querySelector("caption").textContent = "Favori Mesajlarım";
+
+                var a = document.createElement("a");
+                a.textContent = "Export";
+                a.style = "margin: 0 5px 0 5px; float: right; font-size: small;"
+                a.addEventListener("click", db_export);
+                myClone.querySelector("caption").appendChild(a);
+
+                a = document.createElement("a");
+                a.textContent = "Import";
+                a.style = "margin: 0 5px 0 5px; float: right; font-size: small;"
+                a.addEventListener("click", db_import);
+                myClone.querySelector("caption").appendChild(a);
+
+                a = document.createElement("a");
+                a.textContent = "Reset";
+                a.style = "margin: 0 5px 0 5px; float: right; font-size: small;"
+                a.addEventListener("click", db_reset);
+                myClone.querySelector("caption").appendChild(a);
+
                 myClone.querySelector("thead > tr > th").style.width = "";
+                myClone.querySelector("thead > tr > th:nth-of-type(2)").textContent = "Kullanıcı"
                 var th = document.createElement("th");
                 th.textContent = "İşlem";
                 th.style.width = "100px";
@@ -223,36 +477,36 @@
                 for (var i = 0; i < data.rows.length; i++) {
                     var row = data.rows[i];
                     var tr = document.createElement("tr");
-                    var td_1 = document.createElement("td");
-                    var td_2 = document.createElement("td");
-                    var td_3 = document.createElement("td");
-                    var td_4 = document.createElement("td");
-                    var a_1 = document.createElement("a");
-                    var a_2 = document.createElement("a");
-                    var a_3 = document.createElement("a");
+                    var td = document.createElement("td");
 
-                    a_1.href = "/forum/"+ row.url + "/" + row.page + "#msg" + row.msg_id;
-                    a_1.innerHTML = '<img src="/img/icon/Folder/FolderSm.png" alt="Konu">' + row.topic_title;
-                    a_1.target = "_blank";
-                    td_1.appendChild(a_1);
-                    tr.appendChild(td_1);
+                    a = document.createElement("a");
+                    a.href = "/forum/" + row.url + "/" + row.page + "#msg" + row.msg_id;
+                    a.innerHTML = '<img src="/img/icon/Folder/FolderSm.png" alt="Konu">' + row.topic_title;
+                    a.target = "_blank";
+                    td.appendChild(a);
+                    tr.appendChild(td);
 
-                    a_2.href = "/Members/" + row.username;
-                    a_2.textContent = row.username;
-                    td_2.appendChild(a_2);
-                    tr.appendChild(td_2);
+                    td = document.createElement("td");
+                    a = document.createElement("a");
+                    a.href = "/Members/" + row.username;
+                    a.textContent = row.username;
+                    td.appendChild(a);
+                    tr.appendChild(td);
 
+                    td = document.createElement("td");
                     var d = new Date(row.added_on);
-                    td_3.textContent = formatDate(d);
-                    tr.appendChild(td_3);
+                    td.textContent = formatDate(d);
+                    tr.appendChild(td);
 
-                    a_3.href = "#";
-                    a_3.innerHTML = '<span class="imgbundle crossred"></span>Sil';
-                    a_3.dataset.id = row.msg_id;
-                    a_3.addEventListener("click", fav_sil);
-                    td_4.appendChild(a_3);
-                    td_4.style.width = "100px";
-                    tr.appendChild(td_4);
+                    td = document.createElement("td");
+                    a = document.createElement("a");
+                    a.href = "#";
+                    a.innerHTML = '<span class="imgbundle crossred"></span>Sil';
+                    a.dataset.id = row.msg_id;
+                    a.addEventListener("click", fav_sil);
+                    td.appendChild(a);
+                    td.style.width = "100px";
+                    tr.appendChild(td);
 
                     myClone.querySelector("tbody").appendChild(tr);
                 }
@@ -260,8 +514,75 @@
                 myTable.parentNode.insertBefore(myClone, myTable);
             }
 
-            function fav_sil(event)
+            function db_export()
             {
+                webdb.backUp();
+            }
+
+            function db_import()
+            {
+                var pm_id_enc = null;
+                var shares = document.querySelectorAll("table.footable-loaded:nth-of-type(2) a:not([class])");
+                for (var i = 0; i < shares.length; i++)
+                {
+                    var el = shares[i];
+                    if (el.textContent == "Fav Backup")
+                    {
+                        pm_id_enc = el.parentElement.querySelector("i").textContent.trim();
+                        break;
+                    }
+                }
+
+                if (pm_id_enc == null){
+                    alert("You don't have any backup");
+                    return;
+                }
+
+                var password = window.prompt("Enter Password:");
+                if (password == null || password == "" || password.length < 5) return;
+
+                var pm_id_dec = code.decryptMessage(pm_id_enc, password);
+                if (pm_id_dec == false)
+                {
+                    alert('Data Malformed or Password Error!');
+                    return;
+                }
+
+                var parser = new DOMParser();
+                var data_enc;
+
+                http_get("https://www.tahribat.com/Pm?pmid=" + pm_id_dec).then(function(data){
+                    var resp = parser.parseFromString(data, "text/html");
+                    data_enc = resp.querySelector("div.panel.panelwarning.first > p:nth-child(2)").textContent.replace(/\n/g, '').replace(/\s/g, '').trim().hexDecode();
+
+                    var data_dec = code.decryptMessage(data_enc, password);
+                    if (data_dec == false)
+                    {
+                        alert('Data Malformed or Password Error!');
+                        return;
+                    }
+
+                    var b64decoded = decodeURIComponent(escape(window.atob(data_dec)));
+                    var sql_cmds = b64decoded.split(";\n");
+
+                    webdb.import(sql_cmds);
+                    document.querySelector("table.tableBodyScroll").remove();
+                    webdb.getFullFav(full_fav);
+
+                }).catch(function(err){
+                    console.log(err);
+                });
+
+            }
+
+            function db_reset()
+            {
+                webdb.resetTable();
+                document.querySelector("table.tableBodyScroll").remove();
+                webdb.getFullFav(full_fav);
+            }
+
+            function fav_sil(event) {
                 event.preventDefault();
 
                 var msg_id = this.dataset.id;
@@ -270,15 +591,6 @@
                 webdb.getFullFav(full_fav);
             }
 
-            function formatDate(d)
-            {
-                var day = (d.getDate() < 10 ? "0"+d.getDate() : d.getDate());
-                var month = (d.getMonth() < 10 ? "0"+d.getMonth() : d.getMonth());
-                var hour = (d.getHours() < 10 ? "0"+d.getHours() : d.getHours());
-                var minute = (d.getMinutes() < 10 ? "0"+d.getMinutes() : d.getMinutes());
-
-                return day + "/" + month + "/"+ d.getFullYear() + " " + hour + ":" + minute;
-            }
         }
     }
 })();
